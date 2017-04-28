@@ -11,7 +11,7 @@ class Sphere(object):
     def __init__(
         self,
         u0=None, #function to evaluate initial density as fxn of x,y,z
-        u1=None, #potential of mean force as a fxn of x,y,z
+        u1=None, #mean force as a fxn of x,y,z
         k=1000.0,#reaction constant for center
         Ri=1.0, # inner radius of sphere
         Ro=6.0, # outer radius of sphere
@@ -62,20 +62,15 @@ class Sphere(object):
         phi = self.leb.phi 
         wleb = self.leb.w
         Y = util.sh(theta,phi,self.Lsh)
-        ur = np.zeros(len(self.rcheb))
-        ru = np.zeros(len(self.rcheb))
         for rind,r in enumerate(self.rcheb):
             x,y,z = util.sphere_to_cart(r,theta,phi) 
             u0val = u0(x,y,z,self.Ro,self.Ri)
             ufval = u1(x,y,z,self.Ro,self.Ri)
-            #saving radial positions and energies for test plotting
-            ru[rind] =  np.sqrt(x**2 + y**2 + z**2)[0]
-            ur[rind] = ufval[0]
             for l in range(0,self.Lsh+1):
                 for m in range(-l,l+1):
                     Yval = Y[(l,m)]
                     self.u[(l,m)][0,rind] = np.sum(wleb*Yval*u0val)
-                    self.uf[(l,m)][0,rind] = np.sum(wleb*Yval*ufval)
+                    self.uf[(l,m)][0,rind] = np.sum(wleb*Yval*ufval*u0val)
 
         # establish the propagator (Crank Nicolson)
         self.a = self.v*self.dt/2.0
@@ -83,10 +78,6 @@ class Sphere(object):
         D = util.cheb_D(self.Ncheb)
         M = 2.0/self.R*D
         K0 = np.dot(np.diag(1.0/self.rcheb**2),np.dot(M,np.dot(np.diag(self.rcheb**2),M)))
-
-        # calculate the force
-        K1 = D
-
         K = {}
         for l in range(0,self.Lsh+1):
             K[l] = K0 - np.diag(l*(l+1.0)/self.rcheb**2)
@@ -112,24 +103,10 @@ class Sphere(object):
         # Propagate!
         for l in range(0,self.Lsh+1):
             for m in range(-l,l+1):
-                #for ind in range(1,len(self.ts)):
-                for ind in range(1,2):
-                    self.u[(l,m)][ind,:] = np.einsum('ij,j->i',self.U[l],self.u[(l,m)][ind-1,:])
-                    self.uf[(l,m)][ind,:] = -np.dot(K1[l],self.uf[(l,m)][ind-1,:])
-                    print self.uf[(l,m)][ind,:]
+                for ind in range(1,len(self.ts)):
+                    advection = np.gradient(self.uf[(l,m)][0,:])
+                    self.u[(l,m)][ind,:] = np.einsum('ij,j->i',self.U[l],self.u[(l,m)][ind-1,:]) + advection
 
-        tind=1
-        us = self.rad_colloc(tind,ru)
-        plt.clf()
-        for l in range(0,self.Lsh+1):
-            for m in range(-l,+l+1):
-                plt.plot(self.rcheb,self.uf[(l,m)][tind,:],'-o')
-                plt.plot(ru,us[(l,m)],'--')
-
-        plt.plot(ru,ur)
-        plt.plot(ru,-1.0/(ru**2))
-        plt.show()
-        exit()
         
     @property
     def xyzw(
@@ -155,8 +132,7 @@ class Sphere(object):
         vals = {}  
         for l in range(0,self.Lsh+1):
             for m in range(-l,l+1):
-                #avals = util.cheb_trans2(self.uf[(l,m)][tind,:],self.Ncheb)
-                avals = util.cheb_trans2(self.uf[(l,m)][tind,:],self.Ncheb)
+                avals = util.cheb_trans2(self.u[(l,m)][tind,:],self.Ncheb)
                 vals[(l,m)] = np.zeros_like(x)
                 vals[(l,m)][args] += util.cheb_colloc(x[args],avals)
 
@@ -208,7 +184,6 @@ def plot_rads(
     filename,
     ):
 
-    rs = np.linspace(0.0,sphere.Ro,1000)
     us = sphere.rad_colloc(tind,rs)
 
     plt.clf()
@@ -253,8 +228,15 @@ def u0r(
     Ri,
     ):
 
-    # Mass is (pi / alpha)^3/2
-    return 1.0/(np.sqrt(x**2 + y**2 + z**2))
+    return -1.0/(x**2 + y**2 + z**2)
+
+    #Rm = (Ri + Ro)/2.0 
+    #Rd = (Ro-Ri)
+
+    #r = np.sqrt(x**2 + y**2 + z**2)
+    #fx = np.exp(-Rd * (r-Rm)**2)
+
+    #return fx
 
 # => Homework Scope <= #
 
@@ -296,7 +278,7 @@ def plot_integral(
         Ro=Ro, 
         v = 1.0,
         ) 
-
+    exit()
     w = sphere.xyzw[:,3]
     x = sphere.xyzw[:,0]
     y = sphere.xyzw[:,1]
@@ -335,12 +317,12 @@ def make_gifs(
         dt = 0.1,
         Ri=Ri, 
         Ro=Ro, 
-        v = 1.0,
+        v = 0.0,
         ) 
     
     t1 = np.arange(0.0,5.0,0.5)
     t2 = np.arange(5.0,10.0,1.0)
-    t3 = np.arange(300,tmax+50.0,50.0)
+    t3 = np.arange(20.0,200.0,20.0)
     t_plots = np.hstack((t1,t2,t3))
     print "nplots = %d" % (len(t_plots))
     os.system('mkdir gif_k%d/' % (int(k)))
@@ -410,5 +392,5 @@ def make_gifs(
 #plot_integral('abs_int.pdf',tmax=5000.0,t_interval=100.0,k=8.5) 
 #plot_integral('ref_int.pdf',tmax=5000.0,t_interval=100.0,k=0.0) 
 #make_gifs(tmax=5000.0,k=8.0)
-make_gifs(tmax=2.0,k=0.0)
+make_gifs(tmax=200.0,k=0.0)
     
